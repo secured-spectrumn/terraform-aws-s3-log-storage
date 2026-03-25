@@ -20,8 +20,29 @@ variable "object_lock_configuration" {
 
 variable "acl" {
   type        = string
-  description = "The canned ACL to apply. We recommend log-delivery-write for compatibility with AWS services"
+  description = <<-EOT
+    The [canned ACL](https://docs.aws.amazon.com/AmazonS3/latest/dev/acl-overview.html#canned-acl) to apply.
+    Deprecated by AWS in favor of bucket policies.
+    Automatically disabled if `s3_object_ownership` is set to "BucketOwnerEnforced".
+    Defaults to "private" for backwards compatibility, but we recommend setting `s3_object_ownership` to "BucketOwnerEnforced" instead.
+    EOT
   default     = "log-delivery-write"
+}
+
+variable "grants" {
+  type = list(object({
+    id          = string
+    type        = string
+    permissions = list(string)
+    uri         = string
+  }))
+  description = <<-EOT
+    A list of policy grants for the bucket, taking a list of permissions.
+    Conflicts with `acl`. Set `acl` to `null` to use this.
+    Deprecated by AWS in favor of bucket policies, but still required for some log delivery services.
+    Automatically disabled if `s3_object_ownership` is set to "BucketOwnerEnforced".
+    EOT
+  default     = []
   nullable    = false
 }
 
@@ -172,13 +193,33 @@ variable "lifecycle_configuration_rules" {
 
     # `filter_and` is the `and` configuration block inside the `filter` configuration.
     # This is the only place you should specify a prefix.
-    filter_and = any
-    expiration = any
-    transition = list(any)
-
-    noncurrent_version_expiration = any
-    noncurrent_version_transition = list(any)
+    filter_and = optional(object({
+      object_size_greater_than = optional(number) # integer >= 0
+      object_size_less_than    = optional(number) # integer >= 1
+      prefix                   = optional(string)
+      tags                     = optional(map(string))
+    }))
+    expiration = optional(object({
+      date                         = optional(string) # string, RFC3339 time format, GMT
+      days                         = optional(number) # integer > 0
+      expired_object_delete_marker = optional(bool)
+    }))
+    noncurrent_version_expiration = optional(object({
+      newer_noncurrent_versions = optional(number) # integer > 0
+      noncurrent_days           = optional(number) # integer >= 0
+    }))
+    transition = optional(list(object({
+      date          = optional(string) # string, RFC3339 time format, GMT
+      days          = optional(number) # integer >= 0
+      storage_class = string           # string/enum, one of GLACIER, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, DEEP_ARCHIVE, GLACIER_IR.
+    })), [])
+    noncurrent_version_transition = optional(list(object({
+      newer_noncurrent_versions = optional(number) # integer >= 0
+      noncurrent_days           = optional(number) # integer >= 0
+      storage_class             = string           # string/enum, one of GLACIER, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, DEEP_ARCHIVE, GLACIER_IR.
+    })), [])
   }))
+
   description = <<-EOT
     A list of S3 bucket v2 lifecycle rules, as specified in [terraform-aws-s3-bucket](https://github.com/cloudposse/terraform-aws-s3-bucket)"
     These rules are not affected by the deprecated `lifecycle_rule_enabled` flag.
